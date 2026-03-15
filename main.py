@@ -27,6 +27,8 @@ if env_file.exists():
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi import Depends  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
 
 from app.core.auth import verify_api_key  # noqa: E402
 from app.core.config import get_config  # noqa: E402
@@ -44,7 +46,7 @@ from app.api.v1.admin_api import router as admin_router
 from app.api.v1.public_api import router as public_router
 from app.api.v1.video_api import router as video_router
 from app.api.pages import router as pages_router
-from fastapi.staticfiles import StaticFiles
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -159,10 +161,48 @@ def create_app() -> FastAPI:
     )
     app.include_router(files_router, prefix="/v1/files")
 
-    # 静态文件服务
+    # ================= 静态文件服务 (已增强 PWA 支持) =================
     static_dir = APP_DIR / "static"
+    
     if static_dir.exists():
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+        logger.info(f"Static directory found: {static_dir}")
+        
+        # 1. 挂载整个 /static 目录
+        # 解决 HTML 中所有的 /static/common/... 和 /static/public/... 请求
+        try:
+            app.mount("/static", StaticFiles(directory=static_dir), name="static")
+            logger.info("Mounted /static -> app/static")
+        except Exception as e:
+            logger.error(f"Failed to mount /static: {e}")
+
+        # 2. PWA 特殊兼容处理
+        # 你的 HTML 写的是: <link rel="manifest" href="/manifest.webmanifest">
+        # 但文件实际在: app/static/public/pwa/manifest.webmanifest
+        # 标准 mount 无法处理根目录文件映射，必须手动路由
+        public_dir = static_dir / "public"
+        if public_dir.exists():
+            pwa_dir = public_dir / "pwa"
+            manifest_file = pwa_dir / "manifest.webmanifest"
+            sw_file = pwa_dir / "sw.js"
+            
+            # 处理 /manifest.webmanifest
+            if manifest_file.exists():
+                @app.get("/manifest.webmanifest")
+                async def serve_manifest():
+                    return FileResponse(manifest_file, media_type="application/manifest+json")
+                logger.info("Added fallback route for /manifest.webmanifest")
+            else:
+                logger.warning(f"Manifest file not found: {manifest_file}")
+
+            # 处理 /sw.js (Service Worker)
+            if sw_file.exists():
+                @app.get("/sw.js")
+                async def serve_sw():
+                    return FileResponse(sw_file, media_type="application/javascript")
+                logger.info("Added fallback route for /sw.js")
+    else:
+        logger.warning(f"Static directory NOT found: {static_dir}")
+    # =======================================================
 
     # 注册管理与公共路由
     app.include_router(admin_router, prefix="/v1/admin")

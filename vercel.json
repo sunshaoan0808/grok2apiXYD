@@ -6,5 +6,15 @@
     "LOG_LEVEL": "INFO",
     "LOG_FILE_ENABLED": "false",
     "DATA_DIR": "/tmp/data"
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/js/:path*",
+      "destination": "/app/static/public/js/:path*"
+    },
+    {
+      "source": "/css/:path*",
+      "destination": "/app/static/public/css/:path*"
+    }
+  ]
 }
